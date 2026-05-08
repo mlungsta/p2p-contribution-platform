@@ -1,0 +1,526 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+enum UserRole {
+  MEMBER
+  SUPPORT
+  OPS_ADMIN
+  SUPER_ADMIN
+  COMPLIANCE_REVIEWER
+}
+
+enum MemberStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  RESTRICTED
+  SUSPENDED
+  CLOSED
+}
+
+enum PaymentMethodType {
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CRYPTO_ADDRESS
+}
+
+enum PaymentMethodStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  DISABLED
+}
+
+enum ContributionOfferStatus {
+  CREATED
+  WAITING_FOR_POOL
+  ACTIVE
+  MATCHED
+  EXPIRED
+  CANCELLED
+}
+
+enum RecipientRequestStatus {
+  CREATED
+  WAITING_FOR_POOL
+  ACTIVE
+  PARTIALLY_MATCHED
+  FULLY_MATCHED
+  EXPIRED
+  CANCELLED
+  DISPUTED
+}
+
+enum MatchStatus {
+  CREATED
+  ASSIGNED
+  AWAITING_PAYMENT
+  PROOF_UPLOADED
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  DISPUTED
+  RESOLVED
+  EXPIRED
+  CANCELLED
+  COMPLETED
+}
+
+enum ProofStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+
+enum DisputeStatus {
+  OPEN
+  EVIDENCE_REQUIRED
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_MEMBER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskFlagStatus {
+  OPEN
+  MITIGATED
+  ACCEPTED
+  CLOSED
+}
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  CLEARING
+}
+
+enum LedgerTransactionStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum LedgerSourceEntityType {
+  MATCH
+  DISPUTE
+  MANUAL_ADJUSTMENT
+  CONTRIBUTION_OFFER
+  RECIPIENT_REQUEST
+}
+
+enum ReferralLinkStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum BatchRunStatus {
+  STARTED
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  role         UserRole     @default(MEMBER)
+  memberStatus MemberStatus @default(DRAFT) @map("member_status")
+  failedLoginAttempts Int      @default(0) @map("failed_login_attempts")
+  loginLockedUntil     DateTime? @map("login_locked_until")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  memberProfile      MemberProfile?
+  paymentMethods     PaymentMethod[]
+  contributionOffers ContributionOffer[] @relation("OfferOwner")
+  recipientRequests  RecipientRequest[]  @relation("RequestOwner")
+  sentMatches        Match[]             @relation("MatchSender")
+  receivedMatches    Match[]             @relation("MatchRecipient")
+  proofsOfPayment    ProofOfPayment[]    @relation("ProofUploader")
+  openedDisputes     Dispute[]           @relation("DisputeOpenedBy")
+  disputeEvidence    DisputeEvidence[]   @relation("EvidenceUploader")
+  createdTickets     SupportTicket[]     @relation("TicketCreatedBy")
+  assignedTickets    SupportTicket[]     @relation("TicketAssignedTo")
+  riskFlagsCreated   RiskFlag[]          @relation("RiskCreatedBy")
+  riskFlagsOnUser    RiskFlag[]          @relation("RiskTargetUser")
+  auditLogsAsActor   AuditLog[]          @relation("AuditActor")
+
+  referralAsReferrer ReferralLink[] @relation("ReferralReferrer")
+  referralAsReferee  ReferralLink[] @relation("ReferralReferee")
+  authSessions       AuthSession[]
+
+  @@index([role, memberStatus])
+  @@map("users")
+}
+
+model AuthSession {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  jti         String   @unique
+  expiresAt   DateTime @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  revokeReason String? @map("revoke_reason")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model MemberProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique @map("user_id")
+  displayName       String   @map("display_name")
+  countryCode       String?  @map("country_code")
+  phoneNumberMasked String?  @map("phone_number_masked")
+  timezone          String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("member_profiles")
+}
+
+model PaymentMethod {
+  id               String              @id @default(cuid())
+  userId           String              @map("user_id")
+  methodType       PaymentMethodType   @map("method_type")
+  status           PaymentMethodStatus @default(PENDING_VERIFICATION)
+  providerName     String?             @map("provider_name")
+  accountLabel     String              @map("account_label")
+  accountRefMasked String              @map("account_ref_masked")
+  isDefault        Boolean             @default(false) @map("is_default")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, status])
+  @@map("payment_methods")
+}
+
+model ContributionOffer {
+  id                   String                  @id @default(cuid())
+  ownerUserId          String                  @map("owner_user_id")
+  amountMinor          Int                     @map("amount_minor")
+  remainingAmountMinor Int                     @map("remaining_amount_minor")
+  currency             String                  @default("USD")
+  accumulationBatchAt  DateTime?               @map("accumulation_batch_at")
+  expiresAt            DateTime?               @map("expires_at")
+  status               ContributionOfferStatus @default(CREATED)
+  createdAt            DateTime                @default(now()) @map("created_at")
+  updatedAt            DateTime                @updatedAt @map("updated_at")
+
+  owner   User    @relation("OfferOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  matches Match[]
+
+  @@index([ownerUserId, status])
+  @@index([status, accumulationBatchAt, createdAt])
+  @@map("contribution_offers")
+}
+
+model RecipientRequest {
+  id                   String                 @id @default(cuid())
+  ownerUserId          String                 @map("owner_user_id")
+  amountMinor          Int                    @map("amount_minor")
+  remainingAmountMinor Int                    @map("remaining_amount_minor")
+  currency             String                 @default("USD")
+  status               RecipientRequestStatus @default(CREATED)
+  expiresAt            DateTime?              @map("expires_at")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+
+  owner   User    @relation("RequestOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  matches Match[]
+
+  @@index([status, createdAt])
+  @@index([status, expiresAt, createdAt])
+  @@map("recipient_requests")
+}
+
+model Match {
+  id                  String      @id @default(cuid())
+  matchReference      String      @unique @map("match_reference")
+  batchRunId          String      @map("batch_run_id")
+  contributionOfferId String      @map("contribution_offer_id")
+  recipientRequestId  String      @map("recipient_request_id")
+  senderUserId        String      @map("sender_user_id")
+  recipientUserId     String      @map("recipient_user_id")
+  amountMinor         Int         @map("amount_minor")
+  currency            String      @default("USD")
+  dueAt               DateTime?   @map("due_at")
+  status              MatchStatus @default(CREATED)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  contributionOffer ContributionOffer @relation(fields: [contributionOfferId], references: [id], onDelete: Restrict)
+  recipientRequest  RecipientRequest  @relation(fields: [recipientRequestId], references: [id], onDelete: Restrict)
+  sender            User              @relation("MatchSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+  recipient         User              @relation("MatchRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+  proofsOfPayment   ProofOfPayment[]
+  disputes          Dispute[]
+
+  @@unique([batchRunId, contributionOfferId, recipientRequestId], map: "matches_batch_offer_request_key")
+  @@index([batchRunId])
+  @@index([status, createdAt])
+  @@index([senderUserId, status])
+  @@index([senderUserId, recipientUserId, status])
+  @@map("matches")
+}
+
+model MatchingBatchRun {
+  id             String         @id @default(cuid())
+  batchRunId     String         @unique @map("batch_run_id")
+  idempotencyKey String         @unique @map("idempotency_key")
+  status         BatchRunStatus @default(STARTED)
+  startedAt      DateTime       @default(now()) @map("started_at")
+  completedAt    DateTime?      @map("completed_at")
+  triggerSource  String         @map("trigger_source")
+  correlationId  String         @map("correlation_id")
+  actorUserId    String         @map("actor_user_id")
+  actorRole      UserRole       @map("actor_role")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  @@map("matching_batch_runs")
+}
+
+model ReferralLink {
+  id             String             @id @default(cuid())
+  referrerUserId String             @map("referrer_user_id")
+  refereeUserId  String             @unique @map("referee_user_id")
+  depth          Int                @default(1)
+  status         ReferralLinkStatus @default(ACTIVE)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  referrer User @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Restrict)
+  referee  User @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Restrict)
+
+  @@index([referrerUserId, status])
+  @@map("referral_tree")
+}
+
+model ProofOfPayment {
+  id               String      @id @default(cuid())
+  matchId          String      @map("match_id")
+  uploadedByUserId String      @map("uploaded_by_user_id")
+  fileUrl          String      @map("file_url")
+  note             String?
+  status           ProofStatus @default(SUBMITTED)
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  match      Match             @relation(fields: [matchId], references: [id], onDelete: Restrict)
+  uploadedBy User              @relation("ProofUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  evidence   DisputeEvidence[]
+
+  @@index([matchId, status])
+  @@map("proofs_of_payment")
+}
+
+model Dispute {
+  id             String        @id @default(cuid())
+  matchId        String        @map("match_id")
+  openedByUserId String        @map("opened_by_user_id")
+  reason         String
+  status         DisputeStatus @default(OPEN)
+  resolvedAt     DateTime?     @map("resolved_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  match         Match             @relation(fields: [matchId], references: [id], onDelete: Restrict)
+  openedBy      User              @relation("DisputeOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  evidenceItems DisputeEvidence[]
+
+  @@index([matchId, status])
+  @@index([openedByUserId, status])
+  @@map("disputes")
+}
+
+model DisputeEvidence {
+  id               String   @id @default(cuid())
+  disputeId        String   @map("dispute_id")
+  uploadedByUserId String   @map("uploaded_by_user_id")
+  proofOfPaymentId String?  @map("proof_of_payment_id")
+  evidenceType     String   @map("evidence_type")
+  fileUrl          String?  @map("file_url")
+  note             String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  dispute        Dispute         @relation(fields: [disputeId], references: [id], onDelete: Restrict)
+  uploadedBy     User            @relation("EvidenceUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  proofOfPayment ProofOfPayment? @relation(fields: [proofOfPaymentId], references: [id], onDelete: SetNull)
+
+  @@index([disputeId])
+  @@map("dispute_evidence")
+}
+
+model LedgerAccount {
+  id          String            @id @default(cuid())
+  code        String            @unique
+  name        String
+  accountType LedgerAccountType @map("account_type")
+  currency    String            @default("USD")
+  isActive    Boolean           @default(true) @map("is_active")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  ledgerEntries LedgerEntry[]
+
+  @@map("ledger_accounts")
+}
+
+model LedgerTransaction {
+  id                      String                  @id @default(cuid())
+  reference               String                  @unique
+  description             String?
+  correlationId           String                  @map("correlation_id")
+  sourceEntityType        LedgerSourceEntityType  @map("source_entity_type")
+  sourceEntityId          String                  @map("source_entity_id")
+  idempotencyKey          String                  @unique @map("idempotency_key")
+  status                  LedgerTransactionStatus @default(DRAFT)
+  reversalOfTransactionId String?                 @unique @map("reversal_of_transaction_id")
+  reversedByTransactionId String?                 @unique @map("reversed_by_transaction_id")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
+
+  reversalOfTransaction LedgerTransaction? @relation("LedgerTransactionCorrection", fields: [reversalOfTransactionId], references: [id], onDelete: SetNull)
+  correctedByTransaction LedgerTransaction? @relation("LedgerTransactionCorrection")
+  reversedByTransaction LedgerTransaction? @relation("LedgerTransactionReversal", fields: [reversedByTransactionId], references: [id], onDelete: SetNull)
+  reversesTransaction   LedgerTransaction? @relation("LedgerTransactionReversal")
+  entries               LedgerEntry[]
+
+  @@index([correlationId])
+  @@index([sourceEntityType, sourceEntityId])
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id                  String   @id @default(cuid())
+  ledgerTransactionId String   @map("ledger_transaction_id")
+  ledgerAccountId     String   @map("ledger_account_id")
+  debitAmountMinor    Int      @default(0) @map("debit_amount_minor")
+  creditAmountMinor   Int      @default(0) @map("credit_amount_minor")
+  memo                String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  ledgerTransaction LedgerTransaction @relation(fields: [ledgerTransactionId], references: [id], onDelete: Restrict)
+  ledgerAccount     LedgerAccount     @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict)
+
+  @@index([ledgerTransactionId])
+  @@index([ledgerAccountId])
+  @@map("ledger_entries")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorUserId   String   @map("actor_user_id")
+  actorRole     UserRole @map("actor_role")
+  triggerSource String   @map("trigger_source")
+  correlationId String   @map("correlation_id")
+  batchRunId    String?  @map("batch_run_id")
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String   @map("entity_id")
+  beforeState   Json?    @map("before_state")
+  afterState    Json?    @map("after_state")
+  reason        String?
+  metadata      Json?
+  dedupeKey     String?  @unique @map("dedupe_key")
+  occurredAt    DateTime @default(now()) @map("occurred_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  actor User @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+  @@index([batchRunId, createdAt])
+  @@index([correlationId])
+  @@map("audit_logs")
+}
+
+model SupportTicket {
+  id               String         @id @default(cuid())
+  createdByUserId  String         @map("created_by_user_id")
+  assignedToUserId String?        @map("assigned_to_user_id")
+  subject          String
+  description      String
+  status           TicketStatus   @default(OPEN)
+  priority         TicketPriority @default(MEDIUM)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  createdBy  User  @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignedTo User? @relation("TicketAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, priority])
+  @@map("support_tickets")
+}
+
+model RiskFlag {
+  id              String         @id @default(cuid())
+  targetUserId    String         @map("target_user_id")
+  createdByUserId String         @map("created_by_user_id")
+  code            String
+  description     String?
+  severity        RiskSeverity
+  status          RiskFlagStatus @default(OPEN)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  targetUser User @relation("RiskTargetUser", fields: [targetUserId], references: [id], onDelete: Restrict)
+  createdBy  User @relation("RiskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([targetUserId, status])
+  @@map("risk_flags")
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  description String?
+  isSensitive Boolean  @default(false) @map("is_sensitive")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}

@@ -1,0 +1,47 @@
+name: Deploy Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment target"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+  push:
+    branches: [ main ]
+
+jobs:
+  predeploy-and-migrate:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+      url: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_HEALTHCHECK_URL || secrets.STAGING_HEALTHCHECK_URL }}
+    env:
+      NODE_ENV: production
+      APP_ENV: ${{ github.event.inputs.environment || 'staging' }}
+      NEXT_PUBLIC_APP_ENV: ${{ github.event.inputs.environment || 'staging' }}
+      DATABASE_URL: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_DIRECT_DATABASE_URL || secrets.STAGING_DIRECT_DATABASE_URL }}
+      SESSION_SECRET: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_SESSION_SECRET || secrets.STAGING_SESSION_SECRET }}
+      ENABLE_E2E_SESSION_BOOTSTRAP: "false"
+      ENABLE_TEST_AUTH_HELPER: "false"
+      HEALTHCHECK_URL: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_HEALTHCHECK_URL || secrets.STAGING_HEALTHCHECK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run predeploy:checks
+      - run: npm run migrate:status
+      - run: npm run deploy:staging:migrate
+        if: ${{ github.event.inputs.environment != 'production' }}
+      - run: npm run deploy:production:migrate
+        if: ${{ github.event.inputs.environment == 'production' }}
+      - run: npm run test:schema
+      - run: npm run postdeploy:health

@@ -1,0 +1,40 @@
+name: CI Gates
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      APP_ENV: test
+      NEXT_PUBLIC_APP_ENV: test
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.STAGING_DIRECT_DATABASE_URL }}
+      SESSION_SECRET: ${{ secrets.TEST_SESSION_SECRET }}
+      ENABLE_E2E_SESSION_BOOTSTRAP: "false"
+      ENABLE_TEST_AUTH_HELPER: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:auth
+      - run: npm run test:schema
+      - run: npm run test:runtime
+      - run: npm run test:ui-runtime
+      - run: npm run test:e2e
+      - run: npm run test:stress
+      - run: npm run test:security
+      - run: npm run test:deploy-config
+      - run: npm run predeploy:enum
+      - run: npm run migrate:status

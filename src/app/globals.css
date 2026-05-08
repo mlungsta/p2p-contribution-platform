@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --primary: #0f172a;
+  --primary-soft: #1e293b;
+  --border: #cbd5e1;
+  --positive: #047857;
+  --warning: #b45309;
+  --danger: #b91c1c;
+}
+
+body {
+  @apply min-h-screen antialiased;
+  background: radial-gradient(circle at top right, #e2e8f0 0%, var(--bg) 55%);
+  color: var(--text);
+}
+
+.card {
+  @apply rounded-xl border p-4 shadow-sm;
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium text-white transition;
+  background-color: var(--primary);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-soft);
+}
+
+.btn-muted {
+  @apply inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-medium transition;
+  border-color: var(--border);
+  color: var(--text);
+  background-color: #f8fafc;
+}

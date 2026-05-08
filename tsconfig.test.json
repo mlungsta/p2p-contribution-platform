@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "jsx": "react-jsx"
+  },
+  "include": ["src/lib/**/*.ts", "src/server/services/**/*.ts", "src/app/api/**/*.ts", "src/types/**/*.ts", "src/tests/**/*.test.ts"]
+}
