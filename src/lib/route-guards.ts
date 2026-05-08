@@ -4,15 +4,19 @@ import { db } from "@/lib/db";
 import { AppRole, hasPermission, isAdminRole, Permission } from "@/lib/permissions";
 import { resolveAuthenticatedSessionFromSources } from "@/lib/session-auth";
 
-export async function requireAuthenticatedRole(): Promise<AppRole> {
+export async function requireAuthenticatedSession(): Promise<{ actorUserId: string; actorRole: AppRole }> {
   try {
     const reqHeaders = await headers();
     const reqCookies = await cookies();
-    const session = await resolveAuthenticatedSessionFromSources(reqHeaders, reqCookies, db);
-    return session.actorRole;
+    return await resolveAuthenticatedSessionFromSources(reqHeaders, reqCookies, db);
   } catch {
     redirect("/auth");
   }
+}
+
+export async function requireAuthenticatedRole(): Promise<AppRole> {
+  const session = await requireAuthenticatedSession();
+  return session.actorRole;
 }
 
 export async function requireAdminRouteAccess(): Promise<AppRole> {

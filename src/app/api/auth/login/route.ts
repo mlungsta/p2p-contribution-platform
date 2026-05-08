@@ -5,6 +5,7 @@ import { clearSessionCookie, setSessionCookie } from "@/lib/auth-provider";
 import { enforceRateLimit } from "@/lib/api-route";
 import { getCorrelationId } from "@/lib/session-auth";
 import { AuthServiceError, AuthSessionService } from "@/server/services/auth-session-service";
+import { redirectPathForRole } from "@/lib/role-routing";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -25,7 +26,8 @@ export async function POST(req: NextRequest) {
   const service = new AuthSessionService(db);
   try {
     const login = await service.loginWithCredentials(parsed.data.email, parsed.data.password);
-    const res = NextResponse.json({ ok: true, correlationId });
+    const redirectPath = redirectPathForRole(login.role);
+    const res = NextResponse.json({ ok: true, correlationId, data: { role: login.role, redirectPath } });
     setSessionCookie(res, login.token);
     return res;
   } catch (error) {
@@ -44,4 +46,3 @@ export async function POST(req: NextRequest) {
     return res;
   }
 }
-

@@ -28,13 +28,13 @@ async function main() {
   assert.equal(request.amountMinor, 9000);
 
   const memberBlocked = await executeWithErrorHandling(ctx(memberA.id, "MEMBER"), () =>
-    service.runBatchMatching(ctx(memberA.id, "MEMBER"), { batchRunId: uid("b"), idempotencyKey: uid("i") })
+    service.runBatchMatching(ctx(memberA.id, "MEMBER"), { batchRunId: uid("member_block_batch"), idempotencyKey: uid("member_block_idem") })
   );
   assert.equal(memberBlocked.ok, false);
   assert.equal(memberBlocked.error.code, "FORBIDDEN");
 
   const adminBatch = await executeWithErrorHandling(ctx(ops.id, "OPS_ADMIN"), () =>
-    service.runBatchMatching(ctx(ops.id, "OPS_ADMIN"), { batchRunId: uid("b"), idempotencyKey: uid("i") })
+    service.runBatchMatching(ctx(ops.id, "OPS_ADMIN"), { batchRunId: uid("admin_batch"), idempotencyKey: uid("admin_idem") })
   );
   assert.equal(adminBatch.ok, true);
 
@@ -52,7 +52,7 @@ async function main() {
 
   await prisma.systemSetting.upsert({ where: { key: "SAFE_MODE" }, create: { key: "SAFE_MODE", value: { enabled: true } }, update: { value: { enabled: true } } });
   const safeModeBlocked = await executeWithErrorHandling(ctx(ops.id, "OPS_ADMIN"), () =>
-    service.runBatchMatching(ctx(ops.id, "OPS_ADMIN"), { batchRunId: uid("b"), idempotencyKey: uid("i") })
+    service.runBatchMatching(ctx(ops.id, "OPS_ADMIN"), { batchRunId: uid("admin_batch"), idempotencyKey: uid("admin_idem") })
   );
   assert.equal(safeModeBlocked.ok, false);
   assert.equal(safeModeBlocked.error.code, "SAFE_MODE_BLOCKED");
@@ -78,3 +78,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

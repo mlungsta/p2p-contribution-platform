@@ -1,8 +1,10 @@
 node_modules
 .next
-out
-.env
-.env.local
-coverage
+.test-dist
+node_modules
 playwright-report
 test-results
+*.tsbuildinfo
+tests/e2e/.state.json
+.env
+.env.local

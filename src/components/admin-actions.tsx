@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ApiActionMessage, callRuntimeApi, useActionState } from "@/components/runtime-api-client";
 
 function id(prefix: string): string {
@@ -13,6 +13,11 @@ type OverrideContext = {
 };
 
 type DisputeItem = { id: string; status: string; matchId: string; openedByUserId: string };
+type MemberItem = { id: string; email: string; role: string; memberStatus: string; memberProfile?: { displayName?: string | null } | null };
+
+type OfferRow = { id: string; ownerUserId: string; amountMinor: number; remainingAmountMinor: number; status: string; createdAt: string };
+type RequestRow = { id: string; ownerUserId: string; amountMinor: number; remainingAmountMinor: number; status: string; createdAt: string };
+type MatchRow = { id: string; matchReference: string; senderUserId: string; recipientUserId: string; amountMinor: number; status: string; createdAt: string };
 
 export function RunBatchPanel() {
   const state = useActionState();
@@ -226,3 +231,170 @@ export function SafeModePanel() {
     </div>
   );
 }
+
+export function MemberManagementPanel() {
+  const state = useActionState();
+  const [members, setMembers] = useState<MemberItem[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [status, setStatus] = useState("APPROVED");
+  const [reason, setReason] = useState("Operational review");
+
+  async function loadMembers() {
+    const result = await callRuntimeApi<MemberItem[]>("/api/admin/members", { method: "GET" });
+    if (result.ok) {
+      setMembers(result.data);
+      if (!selectedUserId && result.data[0]) setSelectedUserId(result.data[0].id);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    async function init() {
+      const result = await callRuntimeApi<MemberItem[]>("/api/admin/members", { method: "GET" });
+      if (!active || !result.ok) return;
+      setMembers(result.data);
+      if (result.data[0]) setSelectedUserId(result.data[0].id);
+    }
+    void init();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    state.reset();
+    state.setLoading(true);
+    const result = await callRuntimeApi("/api/admin/members", {
+      method: "PATCH",
+      body: JSON.stringify({ userId: selectedUserId, memberStatus: status, reason })
+    });
+    state.setLoading(false);
+    if (result.ok) {
+      state.setSuccess("Member status updated.");
+      await loadMembers();
+    } else {
+      state.setError(result.error);
+    }
+  }
+
+  return (
+    <form className="card space-y-3" onSubmit={submit}>
+      <p className="text-sm font-semibold">Member Approval / Restriction / Suspension</p>
+      {members.length === 0 ? <p data-testid="empty-members" className="text-sm text-slate-600">No members loaded yet.</p> : null}
+      <select data-testid="member-select" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
+        {members.map((m) => <option key={m.id} value={m.id}>{m.email} ({m.memberStatus})</option>)}
+      </select>
+      <select data-testid="member-status-select" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+        {['APPROVED','RESTRICTED','SUSPENDED','PENDING_REVIEW','CLOSED','DRAFT'].map((s) => <option key={s} value={s}>{s}</option>)}
+      </select>
+      <input data-testid="member-status-reason" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="reason" />
+      <button data-testid="member-status-submit" type="submit" className="btn-primary" disabled={!selectedUserId || state.loading || reason.trim().length < 3}>{state.loading ? "Saving..." : "Update Status"}</button>
+      <ApiActionMessage success={state.success} error={state.error} />
+    </form>
+  );
+}
+
+function DataTable({ title, rows, emptyTestId }: { title: string; rows: Array<string>; emptyTestId: string }) {
+  return (
+    <div className="card space-y-2">
+      <p className="text-sm font-semibold">{title}</p>
+      {rows.length === 0 ? <p data-testid={emptyTestId} className="text-sm text-slate-600">No data yet.</p> : null}
+      <ul className="space-y-1 text-xs text-slate-700">{rows.map((r) => <li key={r}>{r}</li>)}</ul>
+    </div>
+  );
+}
+
+export function AdminDataViewsPanel() {
+  const [offers, setOffers] = useState<OfferRow[]>([]);
+  const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [matches, setMatches] = useState<MatchRow[]>([]);
+  const state = useActionState();
+
+  async function load() {
+    state.reset();
+    state.setLoading(true);
+    const [o, r, m] = await Promise.all([
+      callRuntimeApi<OfferRow[]>("/api/admin/offers", { method: "GET" }),
+      callRuntimeApi<RequestRow[]>("/api/admin/requests", { method: "GET" }),
+      callRuntimeApi<MatchRow[]>("/api/admin/matches", { method: "GET" })
+    ]);
+    state.setLoading(false);
+    if (o.ok && r.ok && m.ok) {
+      setOffers(o.data);
+      setRequests(r.data);
+      setMatches(m.data);
+      state.setSuccess("Operational data loaded.");
+      return;
+    }
+    state.setError(!o.ok ? o.error : !r.ok ? r.error : !m.ok ? m.error : null);
+  }
+
+  const offerRows = useMemo(() => offers.slice(0, 20).map((o) => `${o.id} | ${o.status} | ${o.remainingAmountMinor}/${o.amountMinor}`), [offers]);
+  const requestRows = useMemo(() => requests.slice(0, 20).map((r) => `${r.id} | ${r.status} | ${r.remainingAmountMinor}/${r.amountMinor}`), [requests]);
+  const matchRows = useMemo(() => matches.slice(0, 20).map((m) => `${m.matchReference} | ${m.status} | ${m.amountMinor}`), [matches]);
+
+  return (
+    <div className="space-y-3">
+      <div className="card space-y-2">
+        <button data-testid="load-admin-data" type="button" className="btn-muted" onClick={() => void load()} disabled={state.loading}>{state.loading ? "Loading..." : "Load Offers / Requests / Matches"}</button>
+        <ApiActionMessage success={state.success} error={state.error} />
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <DataTable title="Contribution Offers" rows={offerRows} emptyTestId="empty-admin-offers" />
+        <DataTable title="Recipient Requests" rows={requestRows} emptyTestId="empty-admin-requests" />
+        <DataTable title="Matches" rows={matchRows} emptyTestId="empty-admin-matches" />
+      </div>
+    </div>
+  );
+}
+
+export function ForceLogoutPanel() {
+  const state = useActionState();
+  const [members, setMembers] = useState<MemberItem[]>([]);
+  const [targetUserId, setTargetUserId] = useState("");
+  const [reason, setReason] = useState("Security review");
+
+  useEffect(() => {
+    let active = true;
+    async function loadMembers() {
+      const result = await callRuntimeApi<MemberItem[]>("/api/admin/members", { method: "GET" });
+      if (active && result.ok) {
+        setMembers(result.data);
+        if (result.data[0]) setTargetUserId(result.data[0].id);
+      }
+    }
+    void loadMembers();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    state.reset();
+    state.setLoading(true);
+    const result = await callRuntimeApi<{ revokedSessionCount: number }>("/api/admin/sessions/revoke-user", {
+      method: "POST",
+      headers: { "x-step-up-authenticated": "true" },
+      body: JSON.stringify({ targetUserId, reason })
+    });
+    state.setLoading(false);
+    if (result.ok) state.setSuccess(`Revoked ${result.data.revokedSessionCount} session(s).`);
+    else state.setError(result.error);
+  }
+
+  return (
+    <form className="card space-y-3" onSubmit={submit}>
+      <p className="text-sm font-semibold">Force Logout User Sessions (SUPER_ADMIN)</p>
+      {members.length === 0 ? <p className="text-sm text-slate-600">No users available for session revocation.</p> : null}
+      <select data-testid="force-logout-user" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={targetUserId} onChange={(e) => setTargetUserId(e.target.value)}>
+        {members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
+      </select>
+      <input data-testid="force-logout-reason" className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="reason" />
+      <button data-testid="force-logout-submit" type="submit" className="btn-muted" disabled={state.loading || !targetUserId || reason.trim().length < 3}>{state.loading ? "Revoking..." : "Force Logout"}</button>
+      <ApiActionMessage success={state.success} error={state.error} />
+    </form>
+  );
+}
+

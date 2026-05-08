@@ -87,6 +87,16 @@ const adminOverrideSchema = z.object({
 const safeModeSchema = z.object({
   enabled: z.boolean()
 });
+const memberProfileSchema = z.object({
+  displayName: z.string().min(2).max(120),
+  countryCode: z.string().min(2).max(8).optional(),
+  timezone: z.string().min(2).max(64).optional()
+});
+const adminMemberStatusSchema = z.object({
+  userId: idSchema,
+  memberStatus: z.enum(["DRAFT", "PENDING_REVIEW", "APPROVED", "RESTRICTED", "SUSPENDED", "CLOSED"]),
+  reason: z.string().min(3)
+});
 
 class PrismaAuditRepository implements AuditRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -458,6 +468,7 @@ export class RuntimeApiService {
     return this.prisma.user.findUnique({
       where: { id: ctx.actorUserId },
       include: {
+        memberProfile: true,
         contributionOffers: true,
         recipientRequests: true,
         sentMatches: true,
@@ -624,6 +635,150 @@ export class RuntimeApiService {
       orderBy: { createdAt: "asc" },
       take: 100,
       select: { id: true, status: true, matchId: true, openedByUserId: true }
+    });
+  }
+
+  async upsertMemberProfile(ctxInput: unknown, payloadInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["MEMBER"]);
+    const payload = memberProfileSchema.parse(payloadInput);
+
+    const profile = await this.prisma.memberProfile.upsert({
+      where: { userId: ctx.actorUserId },
+      create: {
+        userId: ctx.actorUserId,
+        displayName: payload.displayName,
+        countryCode: payload.countryCode ?? null,
+        timezone: payload.timezone ?? null
+      },
+      update: {
+        displayName: payload.displayName,
+        countryCode: payload.countryCode ?? null,
+        timezone: payload.timezone ?? null
+      }
+    });
+
+    await this.audit.log({
+      actorUserId: ctx.actorUserId,
+      actorRole: ctx.actorRole,
+      triggerSource: ctx.triggerSource,
+      correlationId: ctx.correlationId,
+      action: "member.profile.upserted",
+      entityType: "MEMBER_PROFILE",
+      entityId: profile.id
+    });
+
+    return profile;
+  }
+
+  async getMemberProfile(ctxInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["MEMBER"]);
+    return this.prisma.memberProfile.findUnique({ where: { userId: ctx.actorUserId } });
+  }
+
+  async listMembers(ctxInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["OPS_ADMIN", "SUPER_ADMIN", "COMPLIANCE_REVIEWER"]);
+    return this.prisma.user.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        memberStatus: true,
+        createdAt: true,
+        memberProfile: { select: { displayName: true, countryCode: true, timezone: true } }
+      }
+    });
+  }
+
+  async updateMemberStatus(ctxInput: unknown, payloadInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["OPS_ADMIN", "SUPER_ADMIN"]);
+    const payload = adminMemberStatusSchema.parse(payloadInput);
+
+    const existing = await this.prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { memberStatus: true }
+    });
+    if (!existing) {
+      throw new ApiServiceError("NOT_FOUND", "User not found", ctx.correlationId, 404);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: payload.userId },
+      data: { memberStatus: payload.memberStatus },
+      select: { id: true, memberStatus: true }
+    });
+
+    await this.audit.log({
+      actorUserId: ctx.actorUserId,
+      actorRole: ctx.actorRole,
+      triggerSource: ctx.triggerSource,
+      correlationId: ctx.correlationId,
+      action: "admin.member_status.updated",
+      entityType: "USER",
+      entityId: payload.userId,
+      reason: payload.reason,
+      beforeState: { memberStatus: existing.memberStatus },
+      afterState: { memberStatus: payload.memberStatus }
+    });
+
+    return updated;
+  }
+
+  async listContributionOffers(ctxInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["OPS_ADMIN", "SUPER_ADMIN", "COMPLIANCE_REVIEWER"]);
+    return this.prisma.contributionOffer.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        ownerUserId: true,
+        amountMinor: true,
+        remainingAmountMinor: true,
+        status: true,
+        createdAt: true
+      }
+    });
+  }
+
+  async listRecipientRequests(ctxInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["OPS_ADMIN", "SUPER_ADMIN", "COMPLIANCE_REVIEWER"]);
+    return this.prisma.recipientRequest.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        ownerUserId: true,
+        amountMinor: true,
+        remainingAmountMinor: true,
+        status: true,
+        createdAt: true
+      }
+    });
+  }
+
+  async listMatches(ctxInput: unknown) {
+    const ctx = RuntimeApiService.parseContext(ctxInput);
+    requireRole(ctx, ["OPS_ADMIN", "SUPER_ADMIN", "COMPLIANCE_REVIEWER"]);
+    return this.prisma.match.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 300,
+      select: {
+        id: true,
+        matchReference: true,
+        batchRunId: true,
+        senderUserId: true,
+        recipientUserId: true,
+        amountMinor: true,
+        status: true,
+        createdAt: true
+      }
     });
   }
 }
