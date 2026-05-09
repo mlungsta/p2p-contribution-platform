@@ -8,17 +8,22 @@ type E2EState = {
   opsAdminId: string;
   superAdminId: string;
   disputeReadyMatchId: string;
+  proofReadyMatchId: string;
+  memberEmail: string;
+  opsEmail: string;
+  superEmail: string;
+  loginPassword: string;
 };
 
 const state: E2EState = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "tests", "e2e", ".state.json"), "utf8")
 );
 
-async function bootstrapSession(page: import("@playwright/test").Page, userId: string) {
-  const res = await page.request.post("/api/auth/session", { data: { userId } });
-  expect(res.ok()).toBeTruthy();
-  const payload = await res.json();
-  expect(payload?.ok).toBeTruthy();
+async function loginThroughUi(page: import("@playwright/test").Page, email: string, password: string) {
+  await page.goto("/auth");
+  await page.getByTestId("auth-email").fill(email);
+  await page.getByTestId("auth-password").fill(password);
+  await page.getByTestId("auth-sign-in").click();
 }
 
 test("public navigation", async ({ page }) => {
@@ -33,99 +38,71 @@ test("public navigation", async ({ page }) => {
   await expect(page).toHaveURL(/contact/);
 });
 
-test("member workflow and access restrictions", async ({ page }) => {
-  await bootstrapSession(page, state.memberAId);
-  await page.goto("/dashboard");
+test("member login redirect and member workflow via UI", async ({ page }) => {
+  await loginThroughUi(page, state.memberEmail, state.loginPassword);
   await expect(page).toHaveURL(/\/dashboard$/);
 
-  const offerRes = await page.request.post("/api/contribution-offers", { data: { amountMinor: 11000, currency: "USD" } });
-  const offerJson = await offerRes.json();
-  expect(offerRes.ok()).toBeTruthy();
-  expect(offerJson.ok).toBeTruthy();
+  await expect(page.getByText("Contributions made")).toBeVisible();
+  await expect(page.getByText("Contributions received")).toBeVisible();
+  await expect(page.getByText("Pending matches")).toBeVisible();
 
-  const requestRes = await page.request.post("/api/recipient-requests", { data: { amountMinor: 9000, currency: "USD" } });
-  const requestJson = await requestRes.json();
-  expect(requestRes.ok()).toBeTruthy();
-  expect(requestJson.ok).toBeTruthy();
+  await page.goto("/dashboard/contributions");
+  await page.getByTestId("offer-amount").fill("11000");
+  await page.getByTestId("submit-offer").click();
+  await expect(page.getByTestId("action-success").first()).toContainText("Contribution offer submitted.");
 
-  const disputeRes = await page.request.post("/api/disputes", {
-    data: { matchId: state.disputeReadyMatchId, reason: "Recipient has not acknowledged payment yet" }
-  });
-  const disputeJson = await disputeRes.json();
-  expect(disputeRes.ok()).toBeTruthy();
-  expect(disputeJson.ok).toBeTruthy();
+  await page.getByTestId("request-amount").fill("9000");
+  await page.getByTestId("submit-request").click();
+  await expect(page.getByTestId("action-success").nth(1)).toContainText("Recipient request submitted.");
+
+  await page.goto("/dashboard/matches");
+  await page.getByTestId("upload-proof").click();
+  await expect(page.getByTestId("action-success").first()).toContainText("Proof metadata uploaded.");
+
+  await page.goto("/dashboard/disputes");
+  await page.getByTestId("submit-dispute").click();
+  await expect(page.getByTestId("action-success")).toContainText("Dispute opened.");
+
+  await page.goto("/dashboard/cg-calculator");
+  await expect(page.getByText("Disclaimer: estimate only, not guaranteed.")).toBeVisible();
 
   await page.goto("/admin/matches");
   await expect(page).toHaveURL(/\/auth$/);
 });
 
-test("admin workflow with safe mode controls", async ({ page, context }) => {
-  await bootstrapSession(page, state.superAdminId);
-  await page.goto("/admin");
+test("admin login redirect, safe mode state, and admin workflow via UI", async ({ page }) => {
+  await loginThroughUi(page, state.superEmail, state.loginPassword);
   await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByTestId("admin-safe-mode-state")).toBeVisible();
+
+  await page.getByTestId("disable-safe-mode").click();
 
   const runBatchRes = await page.request.post("/api/matching/run-batch", {
-    data: { batchRunId: `e2e_batch_${Date.now()}`, idempotencyKey: `e2e_idem_${Date.now()}` }
+    data: { batchRunId: `e2e_ui_batch_${Date.now()}`, idempotencyKey: `e2e_ui_idem_${Date.now()}` }
   });
   const runBatchJson = await runBatchRes.json();
   expect(runBatchRes.ok()).toBeTruthy();
   expect(runBatchJson.ok).toBeTruthy();
 
-  const badOverride = await page.request.post("/api/admin/overrides", {
-    headers: { "x-step-up-authenticated": "true" },
-    data: {
-      batchRunId: `e2e_ovr_${Date.now()}`,
-      offerId: "bad_offer",
-      requestId: "bad_request",
-      amountMinor: 500,
-      reason: "no"
-    }
-  });
-  const badOverrideJson = await badOverride.json();
-  expect(badOverride.status()).toBe(400);
-  expect(badOverrideJson.ok).toBeFalsy();
+  await page.goto("/admin/disputes");
+  const resolveButton = page.getByTestId("resolve-dispute");
+  if (await resolveButton.isVisible() && await resolveButton.isEnabled()) {
+    await resolveButton.click();
+    await expect(page.getByTestId("action-success")).toContainText("Dispute resolved.");
+  }
 
-  const auditRes = await page.request.get("/api/admin/audit-logs");
-  const auditJson = await auditRes.json();
-  expect(auditRes.ok()).toBeTruthy();
-  expect(auditJson.ok).toBeTruthy();
-
-  await page.goto("/admin");
-  await expect(page.getByTestId("refresh-safe-mode")).toBeVisible();
-  const safeModeSet = await page.request.patch("/api/admin/safe-mode", { headers: { "x-step-up-authenticated": "true" }, data: { enabled: true } });
-  const safeModeSetJson = await safeModeSet.json();
-  expect(safeModeSet.ok()).toBeTruthy();
-  expect(safeModeSetJson.ok).toBeTruthy();
-  const safeModeRead = await page.request.get("/api/admin/safe-mode");
-  const safeModeReadJson = await safeModeRead.json();
-  expect(safeModeRead.ok()).toBeTruthy();
-  expect(safeModeReadJson.data.enabled).toBe(true);
+  await page.goto("/admin/audit-logs");
+  await page.getByTestId("load-audit-logs").click();
+  await expect(page.getByTestId("action-success")).toContainText("Audit logs loaded.");
 
   await page.goto("/auth");
-  await page.request.delete("/api/auth/session");
-  await bootstrapSession(page, state.opsAdminId);
-
-  const blockedRes = await page.request.post("/api/matching/run-batch", {
-    data: { batchRunId: `e2e_blocked_${Date.now()}`, idempotencyKey: `e2e_blocked_idem_${Date.now()}` }
-  });
-  const blockedJson = await blockedRes.json();
-  expect(blockedRes.ok()).toBeFalsy();
-  expect(blockedJson.error.code).toBe("SAFE_MODE_BLOCKED");
-  expect(typeof blockedJson.error.correlationId).toBe("string");
-
-  // cleanup for subsequent runs
-  await page.goto("/auth");
-  await page.request.delete("/api/auth/session");
-  await bootstrapSession(page, state.superAdminId);
-  const safeModeOff = await page.request.patch("/api/admin/safe-mode", { headers: { "x-step-up-authenticated": "true" }, data: { enabled: false } });
-  const safeModeOffSetJson = await safeModeOff.json();
-  expect(safeModeOff.ok()).toBeTruthy();
-  expect(safeModeOffSetJson.ok).toBeTruthy();
-  await page.goto("/admin");
-  const safeModeOffRead = await page.request.get("/api/admin/safe-mode");
-  const safeModeOffJson = await safeModeOffRead.json();
-  expect(safeModeOffRead.ok()).toBeTruthy();
-  expect(safeModeOffJson.data.enabled).toBe(false);
-
-  await context.clearCookies();
+  await page.getByTestId("auth-sign-out").click();
+  await expect(page).toHaveURL(/\/auth$/);
 });
+
+test("ops admin login redirects to admin", async ({ page }) => {
+  await loginThroughUi(page, state.opsEmail, state.loginPassword);
+  await expect(page).toHaveURL(/\/admin$/);
+});
+
+

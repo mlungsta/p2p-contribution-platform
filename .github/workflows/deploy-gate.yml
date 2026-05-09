@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.event.inputs.environment || 'staging' }}
-      url: ${{ github.event.inputs.environment == 'production' && secrets.PRODUCTION_HEALTHCHECK_URL || secrets.STAGING_HEALTHCHECK_URL }}
     env:
       NODE_ENV: production
       APP_ENV: ${{ github.event.inputs.environment || 'staging' }}

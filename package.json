@@ -4,7 +4,7 @@
     "private":  true,
     "scripts":  {
                     "dev":  "next dev",
-                    "build":  "npx prisma generate && next build",
+                    "build":  "npx prisma generate \u0026\u0026 next build",
                     "start":  "next start",
                     "lint":  "eslint .",
                     "typecheck":  "tsc --noEmit",
@@ -26,7 +26,10 @@
                     "deploy:staging:migrate":  "prisma migrate deploy --schema prisma/schema.prisma",
                     "deploy:production:migrate":  "prisma migrate deploy --schema prisma/schema.prisma",
                     "postdeploy:health":  "node scripts/postdeploy-health-check.mjs",
-                    "verify:staging-env":  "node scripts/verify-staging-env.mjs"
+                    "verify:staging-env":  "node scripts/verify-staging-env.mjs",
+                    "seed:demo":  "node scripts/seed-demo-data.mjs",
+                    "reset:demo":  "node scripts/reset-demo-data.mjs",
+                    "demo:refresh":  "npm run reset:demo \u0026\u0026 npm run seed:demo"
                 },
     "dependencies":  {
                          "@prisma/client":  "^5.22.0",

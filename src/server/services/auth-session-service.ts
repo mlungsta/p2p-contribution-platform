@@ -12,6 +12,7 @@ export class AuthServiceError extends Error {
 
 export interface LoginResult {
   userId: string;
+  role: AppRole;
   token: string;
   jti: string;
 }
@@ -31,14 +32,14 @@ export class AuthSessionService {
   async loginWithCredentials(email: string, password: string): Promise<LoginResult> {
     const user = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true, passwordHash: true, memberStatus: true, failedLoginAttempts: true, loginLockedUntil: true }
+      select: { id: true, role: true, passwordHash: true, memberStatus: true, failedLoginAttempts: true, loginLockedUntil: true }
     });
 
     if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
       if (user) {
         await this.recordFailedLoginAttempt(user.id);
       }
-      throw new AuthServiceError("UNAUTHORIZED", "Invalid credentials");
+      throw new AuthServiceError("UNAUTHORIZED", "Invalid email or password.");
     }
 
     if (user.loginLockedUntil && user.loginLockedUntil > new Date()) {
@@ -66,6 +67,7 @@ export class AuthSessionService {
 
     return {
       userId: user.id,
+      role: user.role,
       token: session.token,
       jti: session.payload.jti
     };
